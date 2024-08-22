@@ -45,14 +45,18 @@ class EB_Mathematica(Binary):
     def extra_options():
         """Additional easyconfig parameters custom to Mathematica."""
         extra_vars = {
-            'activation_key': [None, "Activation key (expected format: 0000-0000-AAAAA)", CUSTOM],
+            "activation_key": [
+                None,
+                "Activation key (expected format: 0000-0000-AAAAA)",
+                CUSTOM,
+            ],
         }
         return Binary.extra_options(extra_vars)
 
     def configure_step(self):
         """No configuration for Mathematica."""
         # ensure a license server is specified
-        if self.cfg['license_server'] is None:
+        if self.cfg["license_server"] is None:
             raise EasyBuildError("No license server specified.")
 
     def build_step(self):
@@ -63,90 +67,127 @@ class EB_Mathematica(Binary):
         """Install Mathematica using install script."""
 
         # make sure $DISPLAY is not set (to avoid that installer uses GUI)
-        orig_display = os.environ.pop('DISPLAY', None)
+        orig_display = os.environ.pop("DISPLAY", None)
 
-        install_script_glob = '%s_%s_LINUX*.sh' % (self.name, self.version)
+        install_script_glob = "%s_%s_LINUX*.sh" % (self.name, self.version)
         # Starting at V13, Mathematica have renamed their install file...
         if LooseVersion(self.version) >= LooseVersion("13"):
-            install_script_glob = '%s_%s_*LINUX*.sh' % (self.name, self.version)
+            install_script_glob = "%s_%s_*LINUX*.sh" % (self.name, self.version)
+        # At 14.1 we can see first steps of rebranding to Wolfram - installfile is called Wolfram_14.1.0_LIN.sh
+        if LooseVersion(self.version) >= LooseVersion("14.1"):
+            install_script_glob = f"Wolfram_{self.version}_LIN.sh"
 
         matches = glob.glob(install_script_glob)
         if len(matches) == 1:
             install_script = matches[0]
-            cmd = self.cfg['preinstallopts'] + './' + install_script
-            shortver = '.'.join(self.version.split('.')[:2])
-            qa_install_path = os.path.join('/usr', 'local', 'Wolfram', self.name, shortver)
+            cmd = self.cfg["preinstallopts"] + "./" + install_script
+            shortver = ".".join(self.version.split(".")[:2])
+            qa_install_path = os.path.join(
+                "/usr", "local", "Wolfram", self.name, shortver
+            )
             qa = {
-                r"Enter the installation directory, or press ENTER to select %s: >" % qa_install_path: self.installdir,
-                r"Create directory (y/n)? >": 'y',
-                r"Should the installer attempt to make this change (y/n)? >": 'n',
-                r"or press ENTER to select /usr/local/bin: >": os.path.join(self.installdir, "bin"),
+                r"Enter the installation directory, or press ENTER to select %s: >"
+                % qa_install_path: self.installdir,
+                r"Create directory (y/n)? >": "y",
+                r"Should the installer attempt to make this change (y/n)? >": "n",
+                r"or press ENTER to select /usr/local/bin: >": os.path.join(
+                    self.installdir, "bin"
+                ),
+                f"or press ENTER to select /usr/local/Wolfram/Wolfram/{shortver}: >": self.installdir,
             }
             no_qa = [
                 r"Now installing.*\n\n.*\[.*\].*",
             ]
             run_cmd_qa(cmd, qa, no_qa=no_qa, log_all=True, simple=True, maxhits=200)
         else:
-            raise EasyBuildError("Failed to isolate install script using '%s': %s", install_script_glob, matches)
+            raise EasyBuildError(
+                "Failed to isolate install script using '%s': %s",
+                install_script_glob,
+                matches,
+            )
 
         # add license server configuration file
         # some relevant documentation at http://reference.wolfram.com/mathematica/tutorial/ConfigurationFiles.html
-        mathpass_path = os.path.join(self.installdir, 'Configuration', 'Licensing', 'mathpass')
+        mathpass_path = os.path.join(
+            self.installdir, "Configuration", "Licensing", "mathpass"
+        )
         try:
             # append to file, to avoid overwriting anything that might be there
             f = open(mathpass_path, "a")
-            f.write("!%s\n" % self.cfg['license_server'])
+            f.write("!%s\n" % self.cfg["license_server"])
             f.close()
             f = open(mathpass_path, "r")
             mathpass_txt = f.read()
             f.close()
             self.log.info("Updated license file %s: %s" % (mathpass_path, mathpass_txt))
         except IOError as err:
-            raise EasyBuildError("Failed to update %s with license server info: %s", mathpass_path, err)
+            raise EasyBuildError(
+                "Failed to update %s with license server info: %s", mathpass_path, err
+            )
 
         # restore $DISPLAY if required
         if orig_display is not None:
-            os.environ['DISPLAY'] = orig_display
+            os.environ["DISPLAY"] = orig_display
 
     def post_install_step(self):
         """Activate installation by using activation key, if provided."""
-        if self.cfg['activation_key']:
+        if self.cfg["activation_key"]:
             # activation key is printed by using '$ActivationKey' in Mathematica, so no reason to keep it 'secret'
-            self.log.info("Activating installation using provided activation key '%s'." % self.cfg['activation_key'])
+            self.log.info(
+                "Activating installation using provided activation key '%s'."
+                % self.cfg["activation_key"]
+            )
             qa = {
-                r"(enter return to skip Web Activation):": self.cfg['activation_key'],
-                r"In[1]:= ": 'Quit[]',
+                r"(enter return to skip Web Activation):": self.cfg["activation_key"],
+                r"In[1]:= ": "Quit[]",
             }
             noqa = [
-                '^%s %s .*' % (self.name, self.version),
-                '^Copyright.*',
+                "^%s %s .*" % (self.name, self.version),
+                "^Copyright.*",
             ]
-            run_cmd_qa(os.path.join(self.installdir, 'bin', 'math'), qa, no_qa=noqa)
+            run_cmd_qa(os.path.join(self.installdir, "bin", "math"), qa, no_qa=noqa)
         else:
-            self.log.info("No activation key provided, so skipping activation of the installation.")
+            self.log.info(
+                "No activation key provided, so skipping activation of the installation."
+            )
 
         super(EB_Mathematica, self).post_install_step()
 
     def sanity_check_step(self):
         """Custom sanity check for Mathematica."""
-        custom_paths = {
-            'files': ['bin/mathematica'],
-            'dirs': ['AddOns', 'Configuration', 'Documentation', 'Executables', 'SystemFiles'],
-        }
+
+        custom_paths = {}
+
+        # in 14.1 we can see rebranding from Mathematica to Wolfram
+        if LooseVersion(self.version) >= LooseVersion("14.1"):
+            custom_paths["files"] = ["bin/wolfram"]
+            custom_commands = ["wolfram --version"]
+        else:
+            custom_paths["files"] = ["bin/mathematica"]
+            custom_commands = ["mathematica --version"]
+
+        custom_paths["dirs"] = [
+            "AddOns",
+            "Configuration",
+            "Documentation",
+            "Executables",
+            "SystemFiles",
+        ]
+
         if LooseVersion(self.version) >= LooseVersion("11.3.0"):
-            custom_paths['files'].append('Executables/wolframscript')
+            custom_paths["files"].append("Executables/wolframscript")
         elif LooseVersion(self.version) >= LooseVersion("11.0.0"):
-            custom_paths['files'].append('bin/wolframscript')
+            custom_paths["files"].append("bin/wolframscript")
 
-        custom_commands = ['mathematica --version']
-
-        super(EB_Mathematica, self).sanity_check_step(custom_paths=custom_paths, custom_commands=custom_commands)
+        super(EB_Mathematica, self).sanity_check_step(
+            custom_paths=custom_paths, custom_commands=custom_commands
+        )
 
     def make_module_req_guess(self):
         """Add both 'bin' and 'Executables' directories to PATH."""
 
         guesses = super(EB_Mathematica, self).make_module_req_guess()
 
-        guesses.update({'PATH': ['bin', 'Executables']})
+        guesses.update({"PATH": ["bin", "Executables"]})
 
         return guesses
